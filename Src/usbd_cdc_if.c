@@ -22,18 +22,7 @@
 #include "usbd_cdc_if.h"
 
 /* USER CODE BEGIN INCLUDE */
-#include "mixes.h"
-#include "stmflash.h"
-#include "cmsis_os.h"
-#include "radiolink.h"
-#include "status.h"
-#include "crsf.h"
-#include "joystick.h"
-#include "stdbool.h"
-#include "common.h"
-#if defined(LiteRadio_Plus_SX1280)||(LiteRadio_Plus_SX1276)
-#include "common.h"
-#endif
+
 /* USER CODE END INCLUDE */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,10 +31,7 @@
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-uint8_t USB_Recive_Buffer[64]; 
-extern uint8_t MasterUID[6];
-extern uint16_t BuzzerSwitch;
-extern bool MasterUidUseChipIDFlag;
+
 /* USER CODE END PV */
 
 /** @addtogroup STM32_USB_OTG_DEVICE_LIBRARY
@@ -255,33 +241,6 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
   /* USER CODE END 5 */
 }
 
-
-
-/**
-  * @brief  CDC_Transmit_FS
-  *         Data to send over USB IN endpoint are sent over CDC interface
-  *         through this function.
-  *         @note
-  *
-  *
-  * @param  Buf: Buffer of data to be sent
-  * @param  Len: Number of data to be sent (in bytes)
-  * @retval USBD_OK if all operations are OK else USBD_FAIL or USBD_BUSY
-  */
-uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len)
-{
-  uint8_t result = USBD_OK;
-  /* USER CODE BEGIN 7 */
-	
-  USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)hUsbDeviceFS.pClassData;
-  if (hcdc->TxState != 0){
-    return USBD_BUSY;
-  }
-  USBD_CDC_SetTxBuffer(&hUsbDeviceFS, Buf, Len);
-  result = USBD_CDC_TransmitPacket(&hUsbDeviceFS);
-  /* USER CODE END 7 */
-  return result;
-}
 /**
   * @brief  Data received over USB OUT endpoint are sent over CDC interface
   *         through this function.
@@ -300,222 +259,38 @@ uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len)
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
-  char i;
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
-	for(i=0;i<*Len;i++) 
-	{
-			USB_Recive_Buffer[i]=Buf[i]; 
-	}
-	SaveMixValueToFlash();
   return (USBD_OK);
   /* USER CODE END 6 */
 }
-/* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
-void SaveMixValueToFlash(void)
-{
-    uint16_t writeWord[10];
-    for(int i=0;i<8;i++)
-    {
-        writeWord[i] = (uint16_t)USB_Recive_Buffer[i];
-    }
-    switch (USB_Recive_Buffer[0])
-    {
-        case CHANNEILS_INPUT_ID:
-        {    
-            STMFLASH_Write(CACHE_MIX_CHANNEL_INFO_ADDR+USB_Recive_Buffer[1]*8,&writeWord[2],4);
-            mixUpdateFlag = 0x01;
-            break;
-        }
-        case LITE_CONFIGER_INFO_ID:
-        {
-            uint16_t channelBuff[32];
-            STMFLASH_Read(CACHE_MIX_CHANNEL_INFO_ADDR,channelBuff,32);
-            STMFLASH_Write(MIX_CHANNEL_INFO_ADDR,channelBuff,32);  
-            
-            STMFLASH_Write(CONFIGER_INFO_ADDR,&writeWord[1],3); 
-            HAL_NVIC_SystemReset();
-            break;
-        }
-        
-        case EXTRA_CUSTOM_CONFIG_ID:
-        {
-            if(USB_Recive_Buffer[1] == 1)
-            {
-                STMFLASH_Write(BuzzerSwitch_ADDR,&writeWord[2],1); 
-                BuzzerSwitch = writeWord[2];
-            }
-            else if(USB_Recive_Buffer[1] == 2)
-            {
-                STMFLASH_Write(JoystickDeadZonePercent_ADDR,&writeWord[2],1); 
-            }
-        }
-        
-#if defined(LiteRadio_Plus_SX1280)    
-        case INTERNAL_CONFIGER_INFO_ID:
-        {
-            if(writeWord[1] == 0x02)
-            {
-                internalCRSFdata.crsfParameter.power = writeWord[2];
-                internalCRSFdata.crsfParameter.rate = writeWord[3];
-                internalCRSFdata.crsfParameter.TLM = writeWord[4];
-                tx_config.power = internalCRSFdata.crsfParameter.power;
-                tx_config.rate = internalCRSFdata.crsfParameter.rate;
-                tx_config.tlm = internalCRSFdata.crsfParameter.TLM;
-            }
-            break;  
-        }
-        case UID_BYTES_ID:
-        {
-            if(USB_Recive_Buffer[1]==0&&USB_Recive_Buffer[2]==0&&USB_Recive_Buffer[3]==0&&USB_Recive_Buffer[4]==0&&USB_Recive_Buffer[5]==0&&USB_Recive_Buffer[6]==0)
-            {
-                MasterUidUseChipIDFlag = true;
-                uint16_t Writetemp[1]; 
-                Writetemp[0] = MasterUidUseChipIDFlag;
-                STMFLASH_Write(MasterUidUseChipIDFlag_ADDR,Writetemp,1);
-            }
-            else
-            {
-                MasterUID[0] = USB_Recive_Buffer[1];
-                MasterUID[1] = USB_Recive_Buffer[2];
-                MasterUID[2] = USB_Recive_Buffer[3];
-                MasterUID[3] = USB_Recive_Buffer[4];
-                MasterUID[4] = USB_Recive_Buffer[5];
-                MasterUID[5] = USB_Recive_Buffer[6];
-                
-                MasterUidUseChipIDFlag = false;
-                uint16_t Writetemp[1]; 
-                Writetemp[0] = MasterUidUseChipIDFlag;
-                STMFLASH_Write(MasterUidUseChipIDFlag_ADDR,Writetemp,1);
-                STMFLASH_Write(MasterID1FromBindPhrase_ADDR,&writeWord[1],1);
-                STMFLASH_Write(MasterID2FromBindPhrase_ADDR,&writeWord[2],1);
-                STMFLASH_Write(MasterID3FromBindPhrase_ADDR,&writeWord[3],1);
-                STMFLASH_Write(MasterID4FromBindPhrase_ADDR,&writeWord[4],1);
-                STMFLASH_Write(MasterID5FromBindPhrase_ADDR,&writeWord[5],1);
-                STMFLASH_Write(MasterID6FromBindPhrase_ADDR,&writeWord[6],1);
-            }
-        }
-#endif   
-        case EXTERNAL_CONFIGER_INFO_ID:
-        {
-            if(writeWord[1] == 0x01)
-            {
-                externalCRSFdata.configStatus = CONFIG_CRSF_ON;
-                externalCRSFdata.configUpdateFlag = 0x01;
-            }
-            else if(writeWord[1] == 0x00)
-            {
-                externalCRSFdata.configStatus = CONFIG_CRSF_OFF;
-            }
-            else if(writeWord[1] == 0x02)
-            {               
-                externalCRSFdata.configSetFlag = 0x01;
-                if(writeWord[6] == 0x01)
-                {
-                    externalCRSFdata.inBindingMode = 0x01;
-                }
-                else if(writeWord[7] == 0x01)
-                {
-                    externalCRSFdata.webUpdateMode = 0x01;
-                }
-                else
-                {
-                    uint8_t rate = 0,power = 0;
-                    power = writeWord[2];
-                    rate = writeWord[3];
-                    externalCRSFdata.crsfParameter.TLM = writeWord[4];
-                    switch (externalCRSFdata.regulatoryDomainIndex)
-                    {
-                        case NANO_TX_915Mhz:
-                            switch(rate)
-                            {
-                                case 0:
-                                    externalCRSFdata.crsfParameter.rate = FREQ_900_RATE_25HZ;
-                                    break;
-                                case 1:
-                                    externalCRSFdata.crsfParameter.rate = FREQ_900_RATE_50HZ;
-                                    break;
-                                case 2:
-                                    externalCRSFdata.crsfParameter.rate = FREQ_900_RATE_100HZ;
-                                    break;
-                                case 3:
-                                    externalCRSFdata.crsfParameter.rate = FREQ_900_RATE_200HZ;
-                                    break;
-                                default:
-                                    break;
-                            }
-                            
-                            break;
-                        case NANO_TX_2400Mhz:
-                            switch(rate)
-                            {
-                                case 0:
-                                    externalCRSFdata.crsfParameter.rate = FREQ_2400_RATE_50HZ;
-                                    break;
-                                case 1:
-                                    externalCRSFdata.crsfParameter.rate = FREQ_2400_RATE_150HZ;
-                                    break;
-                                case 2:
-                                    externalCRSFdata.crsfParameter.rate = FREQ_2400_RATE_250HZ;
-                                    break;
-                                case 3:
-                                    externalCRSFdata.crsfParameter.rate = FREQ_2400_RATE_500HZ;
-                                    break;
-                                default:
-                                    break;
-                            }
-                            break;
-                        default:
-                            break;
-                    }
-                    switch(externalCRSFdata.regulatoryDomainIndex)
-                    {
-                        case NANO_TX_915Mhz:
-                            switch(power)
-                            {
-                                case power100mw:
-                                    externalCRSFdata.crsfParameter.power = power915Mhz100mw;
-                                    break;
-                                case power250mw:
-                                    externalCRSFdata.crsfParameter.power = power915Mhz250mw;
-                                    break;
-                                case power500mw:
-                                    externalCRSFdata.crsfParameter.power = power915Mhz500mw;
-                                    break;
-                                default:
-                                    break;
-                            }
-                            break;
-                            case NANO_TX_2400Mhz:
-                                externalCRSFdata.crsfParameter.power = power;
-                                break;
-                            default:
-                                break;
-                    }
-                    
-                }
-            }
-            break;
-        }
-        case REQUEST_INFO_ID:
-        {
-            requestType1 = USB_Recive_Buffer[1];
-            requestType2 = USB_Recive_Buffer[2];
-            if(requestType1 == 0x00 && requestType2 == 0x01)
-            {
-                sendSpam = 0;
-            }
-            if(requestType1 == 0x00 && requestType2 == 0x03)
-            {
-                configFlag = 1;
-            }
-            break;
-        }
-        default:
-            break;
-    }
 
+/**
+  * @brief  CDC_Transmit_FS
+  *         Data to send over USB IN endpoint are sent over CDC interface
+  *         through this function.
+  *         @note
+  *
+  *
+  * @param  Buf: Buffer of data to be sent
+  * @param  Len: Number of data to be sent (in bytes)
+  * @retval USBD_OK if all operations are OK else USBD_FAIL or USBD_BUSY
+  */
+uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len)
+{
+  uint8_t result = USBD_OK;
+  /* USER CODE BEGIN 7 */
+  USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)hUsbDeviceFS.pClassData;
+  if (hcdc->TxState != 0){
+    return USBD_BUSY;
+  }
+  USBD_CDC_SetTxBuffer(&hUsbDeviceFS, Buf, Len);
+  result = USBD_CDC_TransmitPacket(&hUsbDeviceFS);
+  /* USER CODE END 7 */
+  return result;
 }
+
+/* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
 
 /* USER CODE END PRIVATE_FUNCTIONS_IMPLEMENTATION */
 
